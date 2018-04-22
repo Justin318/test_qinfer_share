@@ -80,7 +80,8 @@ class AmplitudeEstimator(FiniteOutcomeModel):
         a = modelparams[:, 0]
         offset = modelparams[:, 1]
         return np.logical_and(-a + offset > 0, a + offset < 1)
-
+#         return np.ones(a.shape)
+        
     def n_outcomes(self, expparams):
         """
         Returns an array of dtype ``uint`` describing the number of outcomes
@@ -120,7 +121,7 @@ class AmplitudeEstimator(FiniteOutcomeModel):
         return FiniteOutcomeModel.pr0_to_likelihood_array(outcomes, pr0)
 
 # <codecell>
-
+from qinfer import Distribution
 from unittest import TestCase
 import gvar
 
@@ -136,7 +137,7 @@ class TestAmplitudeEstimator(TestCase):
 
         true_omega = omega
         omega_min, omega_max = [0, 4 * np.pi]
-        n_shots = 200
+        n_shots = 1000
 
         ts = np.linspace(0, 2, 20)
 
@@ -168,6 +169,7 @@ class TestAmplitudeEstimator(TestCase):
 
         """
         model = BinomialModel(AmplitudeEstimator(freq))
+        
         prior =  PostselectedDistribution(
         UniformDistribution(
             [
@@ -177,6 +179,9 @@ class TestAmplitudeEstimator(TestCase):
            model,
            maxiters=10000
         )
+
+#         prior = MyDistribution()
+
 
         data = load_data_or_txt(data, [
             ('counts', 'uint'),
@@ -237,8 +242,164 @@ s = TestAmplitudeEstimator()
 s.bootstrap(a=0.45)
 
 # <markdowncell>
-# ## Bootstrap with amplitude = 0.49
+# ## Bootstrap with amplitude = 0.495
 
 # <codecell>
 s = TestAmplitudeEstimator()
 s.bootstrap(a=0.495)
+
+# <markdowncell>
+# # Test Amplitude estimator with custom prior
+
+# <codecell>
+from qinfer import Distribution
+from unittest import TestCase
+import gvar
+
+from qinfer import Distribution
+
+
+class MyDistribution(Distribution):
+
+    def n_rvs(self):
+        return 2
+    
+    def sample(self, n=1):
+        """
+        """
+        s = 0
+        if s == 1:
+            offset = 0.2 * np.random.rand(n) + 0.3
+
+            a_min = 0
+            a_max = np.minimum(0.5, offset)
+            a = (a_max - a_min) * np.random.rand(n) + a_min
+        
+        else:
+            a = 0.2 * np.random.rand(n) + 0.3
+
+            o_min = np.maximum(0.3, a)
+            o_max = 0.5
+            offset = (o_max - o_min) * np.random.rand(n) + o_min
+
+
+
+        return np.concatenate([a[:,np.newaxis], offset[:,np.newaxis], ], axis=1)
+
+
+
+
+
+
+class TestAmplitudeEstimator2(TestCase):
+    
+    def test_qinfer_estimate(self, a, omega, phase, offset):
+        """
+
+        Returns:
+
+        """
+
+        true_omega = omega
+        omega_min, omega_max = [0, 4 * np.pi]
+        n_shots = 1000
+
+        ts = np.linspace(0, 2, 20)
+
+        signal = a * np.cos(true_omega * ts + phase) + offset
+
+        assert np.all(signal <= 1) and np.all(signal >= 0)
+
+        counts = np.random.binomial(n=n_shots, p=signal)
+
+        data = np.column_stack([counts, ts, n_shots * np.ones_like(counts)])
+
+        mean, cov, extra = self.run_estimate(data, true_omega,
+                                             # freq_min=omega_min, freq_max=omega_max,
+                                             return_all=True)
+
+        return mean, cov
+
+    @staticmethod
+    def run_estimate(data, freq,
+                     n_particles=10000, return_all=False):
+        """this is a copy of qinfer.simple_
+
+        Args:
+            data:
+            n_particles:
+            return_all:
+
+        Returns:
+
+        """
+        model = BinomialModel(AmplitudeEstimator(freq))
+        
+#         prior =  PostselectedDistribution(
+#         UniformDistribution(
+#             [
+#                 [0.30, 0.5],
+#                 [0.30, 0.5]
+#              ]),
+#            model,
+#            maxiters=10000
+#         )
+
+        prior = MyDistribution()
+
+
+        data = load_data_or_txt(data, [
+            ('counts', 'uint'),
+            ('t', float),
+            ('n_shots', 'uint')
+        ])
+
+        outcomes, expparams = data_to_params(data,
+            model.expparams_dtype,
+            cols_expparams={
+                't': (1, 't'),
+                'n_meas': (2, 'n_shots')
+            }
+        )
+
+        return do_update(
+            model, n_particles, prior, outcomes, expparams,
+            return_all
+        )
+
+    def bootstrap(self, a=0.45):
+        """
+        """
+        omega = _twopi
+        phi = 0
+        offset = 0.50
+        
+        nbootstrap = 500
+        amp = []
+        for ii in range(nbootstrap):
+            mean, cov = self.test_qinfer_estimate(a, omega, phi, offset)
+            amp.append(gvar.gvar(mean[0], np.sqrt(np.diag(cov))[0]))
+            
+        a_weighted = np.mean(gvar.mean(amp))
+        print('mean = {}'.format((a_weighted - a) / a))
+            
+        plt.figure(figsize=(8, 4))
+        plt.subplot(1, 2, 1)
+        plt.hist((gvar.mean(amp) - a) / a)
+        plt.xlabel('ratio of a_fit / a - 1')
+        plt.ylabel('frequency')
+        
+        plt.subplot(1, 2, 2)
+        plt.hist(gvar.sdev(amp))
+        plt.xlabel('standard error of a')
+        plt.ylabel('frequency')
+        
+        plt.tight_layout()
+        
+        plt.show()
+        
+        
+        
+s = TestAmplitudeEstimator2()
+s.bootstrap(a=0.495)
+        
